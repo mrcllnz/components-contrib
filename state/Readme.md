@@ -9,7 +9,7 @@ Currently supported state stores are:
 * Azure Table Storage
 * Cassandra
 * Cloud Firestore (Datastore mode)
-* CloudState
+* Cloudstate
 * Couchbase
 * Etcd
 * HashiCorp Consul

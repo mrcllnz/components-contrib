@@ -75,7 +75,7 @@ func (c *CRDT) startServer() error {
 		ServiceVersion: "0.1.0",
 	})
 	// TODO: Allow ReportError to log to a user defined logger, https://github.com/cloudstateio/go-support/issues/31
-	//c.logger.Errorf("error from CloudState: %s", in.GetMessage())
+	//c.logger.Errorf("error from Cloudstate: %s", in.GetMessage())
 	if err != nil {
 		return err
 	}
@@ -105,14 +105,14 @@ func (c *CRDT) startServer() error {
 	return nil
 }
 
-// Since CloudState runs as a sidecar, we're pushing the connection init to be lazily executed when a request comes in to
-// Give CloudState ample time to start and form a cluster.
+// Since Cloudstate runs as a sidecar, we're pushing the connection init to be lazily executed when a request comes in to
+// Give Cloudstate ample time to start and form a cluster.
 func (c *CRDT) createConnectionOnce() error {
 	var connError error
 	doOnce.Do(func() {
 		conn, err := grpc.Dial(c.metadata.host, grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
-			connError = fmt.Errorf("couldn't establish connection to CloudState: %s", err)
+			connError = fmt.Errorf("couldn't establish connection to Cloudstate: %s", err)
 		} else {
 			c.connection = conn
 		}
@@ -144,7 +144,7 @@ func (c *CRDT) getClient() kvstore_pb.KeyValueStoreClient {
 	return kvstore_pb.NewKeyValueStoreClient(c.connection)
 }
 
-// Get retrieves state from CloudState with a key
+// Get retrieves state from Cloudstate with a key
 func (c *CRDT) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -203,7 +203,7 @@ func (c *CRDT) BulkDelete(req []state.DeleteRequest) error {
 	return nil
 }
 
-// Set saves state into CloudState
+// Set saves state into Cloudstate
 func (c *CRDT) Set(req *state.SetRequest) error {
 	err := c.createConnectionOnce()
 	if err != nil {
