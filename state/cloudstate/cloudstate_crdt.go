@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudstateio/go-support/cloudstate"
 	"github.com/cloudstateio/go-support/cloudstate/crdt"
+	"github.com/cloudstateio/go-support/cloudstate/protocol"
 	"github.com/dapr/components-contrib/state"
 	kvstore_pb "github.com/dapr/components-contrib/state/cloudstate/proto/kv_store"
 	"github.com/dapr/dapr/pkg/logger"
@@ -70,7 +71,7 @@ func (c *CRDT) startServer() error {
 	// TODO: Configure port and interface for the server by API, https://github.com/cloudstateio/go-support/issues/30
 	//c.metadata.host
 	//c.metadata.serverPort
-	server, err := cloudstate.New(cloudstate.Config{
+	server, err := cloudstate.New(protocol.Config{
 		ServiceName:    "cloudstate.KeyValueStore",
 		ServiceVersion: "0.1.0",
 	})
@@ -79,11 +80,11 @@ func (c *CRDT) startServer() error {
 	if err != nil {
 		return err
 	}
-	err = server.RegisterCrdt(
+	err = server.RegisterCRDT(
 		&crdt.Entity{
 			ServiceName: "cloudstate.KeyValueStore",
 			EntityFunc: func(crdt.EntityId) interface{} {
-				return value{crdt.NewLWWRegister(nil)}
+				return &value{}
 			},
 			SetFunc:     setFunc,
 			DefaultFunc: defaultFunc,
@@ -91,7 +92,7 @@ func (c *CRDT) startServer() error {
 				return entity.(*value).handleCommand(ctx, name, msg)
 			},
 		},
-		cloudstate.DescriptorConfig{
+		protocol.DescriptorConfig{
 			Service: "kv_store.proto",
 		},
 	)
@@ -248,7 +249,7 @@ func (c *CRDT) BulkSet(req []state.SetRequest) error {
 	return nil
 }
 
-// value is the choosen CRDT type used to store data in Cloudstate
+// value embeds the chosen CRDT type used to store data in Cloudstate
 type value struct {
 	*crdt.LWWRegister
 }
@@ -272,6 +273,7 @@ func (v *value) handleCommand(ctx *crdt.CommandContext, name string, msg interfa
 		switch m := msg.(type) {
 		case *kvstore_pb.SaveStateEnvelope:
 			v.Set(m.GetValue())
+			return ptypes.MarshalAny(&empty.Empty{})
 		}
 	}
 	ctx.Fail(fmt.Errorf("command not handled: %v", name))
@@ -281,14 +283,17 @@ func (v *value) handleCommand(ctx *crdt.CommandContext, name string, msg interfa
 func setFunc(ctx *crdt.Context, c crdt.CRDT) {
 	switch t := c.(type) {
 	case *crdt.LWWRegister:
-		ctx.Instance.(*value).LWWRegister = t
+		switch v := ctx.Instance.(type) {
+		case *value:
+			v.LWWRegister = t
+		default:
+			ctx.Fail(fmt.Errorf("supplied CRDT: %+v cannot bet set to: %+v", c, ctx.Instance))
+		}
 	default:
-		ctx.Fail(fmt.Errorf("supplied CRDT is no LWWRegister but: %+v", c))
+		ctx.Fail(fmt.Errorf("supplied CRDT: %+v cannot bet set to: %+v", c, ctx.Instance))
 	}
 }
 
-func defaultFunc(c *crdt.Context) crdt.CRDT {
-	v := c.Instance.(value)
-	v.LWWRegister = crdt.NewLWWRegister(nil)
-	return v
+func defaultFunc(*crdt.Context) crdt.CRDT {
+	return crdt.NewLWWRegister(nil)
 }
