@@ -68,7 +68,7 @@ make DEBUG=1 build
 ```bash
 # Back up the current daprd
 mv /usr/local/bin/daprd /usr/local/bin/daprd.bak
-cp ./dist/darwin_amd64/debug/daprd /usr/local/bin
+cp ./dist/darwin_amd64/debug/daprd ~/.dapr/bin
 ```
 > Linux Debuggable Binary: ./dist/linux_amd64/debug/daprd
 > Windows Debuggable Binary: .\dist\windows_amd64\debug\daprd
@@ -84,7 +84,8 @@ cp ./dist/darwin_amd64/debug/daprd /usr/local/bin
 3. Fetch the latest dapr/dapr repo
 4. Update component-contrib go mod and ensure that component-contrib is updated to the latest version
 ```bash
-go get -u github.com/dapr/components-contrib
+go get -u github.com/dapr/components-contrib@master
+go mod tidy
 ```
 5. Import your component to Dapr [main.go](https://github.com/dapr/dapr/blob/d17e9243b308e830649b0bf3af5f6e84fd543baf/cmd/daprd/main.go#L79)
 6. Register your component in Dapr [main.go](https://github.com/dapr/dapr/blob/d17e9243b308e830649b0bf3af5f6e84fd543baf/cmd/daprd/main.go#L153-L226)
