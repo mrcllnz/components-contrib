@@ -8,6 +8,7 @@ package cloudstate
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/dapr/components-contrib/state"
 	kvstore_pb "github.com/dapr/components-contrib/state/cloudstate/proto/kv_store"
 	"github.com/dapr/dapr/pkg/logger"
+	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
 	any "github.com/golang/protobuf/ptypes/any"
 	empty "github.com/golang/protobuf/ptypes/empty"
@@ -68,28 +70,20 @@ func (c *CRDT) Init(metadata state.Metadata) error {
 }
 
 func (c *CRDT) startServer() error {
-	// TODO: Configure port and interface for the server by API, https://github.com/cloudstateio/go-support/issues/30
-	//c.metadata.host
-	//c.metadata.serverPort
 	server, err := cloudstate.New(protocol.Config{
 		ServiceName:    "cloudstate.KeyValueStore",
 		ServiceVersion: "0.1.0",
 	})
 	// TODO: Allow ReportError to log to a user defined logger, https://github.com/cloudstateio/go-support/issues/31
-	//c.logger.Errorf("error from Cloudstate: %s", in.GetMessage())
+	// c.logger.Errorf("error from Cloudstate: %s", in.GetMessage())
 	if err != nil {
 		return err
 	}
 	err = server.RegisterCRDT(
 		&crdt.Entity{
 			ServiceName: "cloudstate.KeyValueStore",
-			EntityFunc: func(crdt.EntityId) interface{} {
+			EntityFunc: func(crdt.EntityId) crdt.EntityHandler {
 				return &value{}
-			},
-			SetFunc:     setFunc,
-			DefaultFunc: defaultFunc,
-			CommandFunc: func(entity interface{}, ctx *crdt.CommandContext, name string, msg interface{}) (*any.Any, error) {
-				return entity.(*value).handleCommand(ctx, name, msg)
 			},
 		},
 		protocol.DescriptorConfig{
@@ -99,7 +93,11 @@ func (c *CRDT) startServer() error {
 	if err != nil {
 		return err
 	}
-	if err := server.Run(); err != nil {
+	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", c.metadata.host, c.metadata.serverPort))
+	if err != nil {
+		return err
+	}
+	if err := server.RunWithListener(lis); err != nil {
 		c.logger.Fatalf("failed to run: %v", err)
 		return err
 	}
@@ -251,49 +249,46 @@ func (c *CRDT) BulkSet(req []state.SetRequest) error {
 
 // value embeds the chosen CRDT type used to store data in Cloudstate
 type value struct {
-	*crdt.LWWRegister
+	register *crdt.LWWRegister
 }
 
-func (v *value) handleCommand(ctx *crdt.CommandContext, name string, msg interface{}) (*any.Any, error) {
+func (v *value) HandleCommand(ctx *crdt.CommandContext, name string, msg proto.Message) (*any.Any, error) {
 	switch name {
 	case "GetState":
 		switch msg.(type) {
 		case *kvstore_pb.GetStateEnvelope:
 			return ptypes.MarshalAny(&kvstore_pb.GetStateResponseEnvelope{
-				Data: v.Value(),
+				Data: v.register.Value(),
 			})
 		}
 	case "DeleteState":
 		switch msg.(type) {
 		case *kvstore_pb.DeleteStateEnvelope:
-			v.Set(&any.Any{})
+			v.register.Set(&any.Any{})
 			return ptypes.MarshalAny(&empty.Empty{})
 		}
 	case "SaveState":
 		switch m := msg.(type) {
 		case *kvstore_pb.SaveStateEnvelope:
-			v.Set(m.GetValue())
+			v.register.Set(m.GetValue())
 			return ptypes.MarshalAny(&empty.Empty{})
 		}
 	}
-	ctx.Fail(fmt.Errorf("command not handled: %v", name))
-	return nil, nil
+	return nil, fmt.Errorf("command not handled: %v", name)
 }
 
-func setFunc(ctx *crdt.Context, c crdt.CRDT) {
+func (v *value) Set(ctx *crdt.Context, c crdt.CRDT) error {
 	switch t := c.(type) {
 	case *crdt.LWWRegister:
 		switch v := ctx.Instance.(type) {
 		case *value:
-			v.LWWRegister = t
-		default:
-			ctx.Fail(fmt.Errorf("supplied CRDT: %+v cannot bet set to: %+v", c, ctx.Instance))
+			v.register = t
+			return nil
 		}
-	default:
-		ctx.Fail(fmt.Errorf("supplied CRDT: %+v cannot bet set to: %+v", c, ctx.Instance))
 	}
+	return fmt.Errorf("supplied CRDT: %+v cannot bet set to: %+v", c, ctx.Instance)
 }
 
-func defaultFunc(*crdt.Context) crdt.CRDT {
-	return crdt.NewLWWRegister(nil)
+func (v *value) Default(ctx *crdt.Context) (crdt.CRDT, error) {
+	return crdt.NewLWWRegister(nil), nil
 }
