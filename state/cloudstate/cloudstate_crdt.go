@@ -74,15 +74,13 @@ func (c *CRDT) startServer() error {
 		ServiceName:    "cloudstate.KeyValueStore",
 		ServiceVersion: "0.1.0",
 	})
-	// TODO: Allow ReportError to log to a user defined logger, https://github.com/cloudstateio/go-support/issues/31
-	// c.logger.Errorf("error from Cloudstate: %s", in.GetMessage())
 	if err != nil {
 		return err
 	}
 	err = server.RegisterCRDT(
 		&crdt.Entity{
 			ServiceName: "cloudstate.KeyValueStore",
-			EntityFunc: func(crdt.EntityId) crdt.EntityHandler {
+			EntityFunc: func(id crdt.EntityID) crdt.EntityHandler {
 				return &value{}
 			},
 		},
@@ -105,7 +103,7 @@ func (c *CRDT) startServer() error {
 }
 
 // Since Cloudstate runs as a sidecar, we're pushing the connection init to be lazily executed when a request comes in to
-// Give Cloudstate ample time to start and form a cluster.
+// give Cloudstate ample time to start and form a cluster.
 func (c *CRDT) createConnectionOnce() error {
 	var connError error
 	doOnce.Do(func() {
