@@ -21,8 +21,8 @@ import (
 	"github.com/dapr/dapr/pkg/logger"
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes"
-	any "github.com/golang/protobuf/ptypes/any"
-	empty "github.com/golang/protobuf/ptypes/empty"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/golang/protobuf/ptypes/empty"
 	jsoniter "github.com/json-iterator/go"
 	"google.golang.org/grpc"
 )
@@ -56,7 +56,7 @@ func NewCRDT(logger logger.Logger) *CRDT {
 	}
 }
 
-// Init does metadata and connection parsing
+// Init does metadata and connection parsing.
 func (c *CRDT) Init(metadata state.Metadata) error {
 	m, err := c.parseMetadata(metadata)
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *CRDT) getClient() kvstore_pb.KeyValueStoreClient {
 	return kvstore_pb.NewKeyValueStoreClient(c.connection)
 }
 
-// Get retrieves state from Cloudstate with a key
+// Get retrieves state from Cloudstate with a key.
 func (c *CRDT) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -170,12 +170,14 @@ func (c *CRDT) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	return stateResp, nil
 }
 
-// BulkGet performs a bulks get operations
+// BulkGet performs a bulks get operations.
 func (c *CRDT) BulkGet(req []state.GetRequest) (bool, []state.BulkGetResponse, error) {
+	// by default, the store doesn't support bulk get
+	// return false so daprd will fallback to call get() method one by one
 	return false, nil, nil
 }
 
-// Delete performs a delete operation
+// Delete performs a delete operation.
 func (c *CRDT) Delete(req *state.DeleteRequest) error {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -198,7 +200,7 @@ func (c *CRDT) Delete(req *state.DeleteRequest) error {
 	return err
 }
 
-// BulkDelete performs a bulk delete operation
+// BulkDelete performs a bulk delete operation.
 func (c *CRDT) BulkDelete(req []state.DeleteRequest) error {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -272,7 +274,7 @@ type value struct {
 	register *crdt.LWWRegister
 }
 
-func (v *value) HandleCommand(ctx *crdt.CommandContext, name string, msg proto.Message) (*any.Any, error) {
+func (v *value) HandleCommand(_ *crdt.CommandContext, name string, msg proto.Message) (*any.Any, error) {
 	switch name {
 	case "GetState":
 		switch msg.(type) {
