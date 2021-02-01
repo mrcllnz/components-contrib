@@ -8,7 +8,6 @@ package postgresql
 import (
 	"database/sql"
 	"encoding/json"
-
 	"errors"
 	"fmt"
 	"strconv"
@@ -38,6 +37,7 @@ type postgresDBAccess struct {
 // newPostgresDBAccess creates a new instance of postgresAccess
 func newPostgresDBAccess(logger logger.Logger) *postgresDBAccess {
 	logger.Debug("Instantiating new PostgreSQL state store")
+
 	return &postgresDBAccess{
 		logger: logger,
 	}
@@ -52,12 +52,14 @@ func (p *postgresDBAccess) Init(metadata state.Metadata) error {
 		p.connectionString = val
 	} else {
 		p.logger.Error("Missing postgreSQL connection string")
+
 		return fmt.Errorf(errMissingConnectionString)
 	}
 
 	db, err := sql.Open("pgx", p.connectionString)
 	if err != nil {
 		p.logger.Error(err)
+
 		return err
 	}
 
@@ -102,7 +104,7 @@ func (p *postgresDBAccess) setValue(req *state.SetRequest) error {
 
 	// Sprintf is required for table name because sql.DB does not substitute parameters for table names.
 	// Other parameters use sql.DB parameter substitution.
-	if req.ETag == "" {
+	if req.ETag == nil {
 		result, err = p.db.Exec(fmt.Sprintf(
 			`INSERT INTO %s (key, value) VALUES ($1, $2)
 			ON CONFLICT (key) DO UPDATE SET value = $2, updatedate = NOW();`,
@@ -110,9 +112,9 @@ func (p *postgresDBAccess) setValue(req *state.SetRequest) error {
 	} else {
 		// Convert req.ETag to integer for postgres compatibility
 		var etag int
-		etag, err = strconv.Atoi(req.ETag)
+		etag, err = strconv.Atoi(*req.ETag)
 		if err != nil {
-			return err
+			return state.NewETagError(state.ETagInvalid, err)
 		}
 
 		// When an etag is provided do an update - no insert
@@ -140,6 +142,7 @@ func (p *postgresDBAccess) Get(req *state.GetRequest) (*state.GetResponse, error
 		if err == sql.ErrNoRows {
 			return &state.GetResponse{}, nil
 		}
+
 		return nil, err
 	}
 
@@ -167,13 +170,13 @@ func (p *postgresDBAccess) deleteValue(req *state.DeleteRequest) error {
 	var result sql.Result
 	var err error
 
-	if req.ETag == "" {
+	if req.ETag == nil {
 		result, err = p.db.Exec("DELETE FROM state WHERE key = $1", req.Key)
 	} else {
 		// Convert req.ETag to integer for postgres compatibility
-		etag, conversionError := strconv.Atoi(req.ETag)
+		etag, conversionError := strconv.Atoi(*req.ETag)
 		if conversionError != nil {
-			return conversionError
+			return state.NewETagError(state.ETagInvalid, err)
 		}
 
 		result, err = p.db.Exec("DELETE FROM state WHERE key = $1 and xmin = $2", req.Key, etag)
@@ -195,6 +198,7 @@ func (p *postgresDBAccess) ExecuteMulti(sets []state.SetRequest, deletes []state
 			err = p.Delete(&da)
 			if err != nil {
 				tx.Rollback()
+
 				return err
 			}
 		}
@@ -206,12 +210,14 @@ func (p *postgresDBAccess) ExecuteMulti(sets []state.SetRequest, deletes []state
 			err = p.Set(&sa)
 			if err != nil {
 				tx.Rollback()
+
 				return err
 			}
 		}
 	}
 
 	err = tx.Commit()
+
 	return err
 }
 
@@ -219,6 +225,7 @@ func (p *postgresDBAccess) ExecuteMulti(sets []state.SetRequest, deletes []state
 func (p *postgresDBAccess) returnSingleDBResult(result sql.Result, err error) error {
 	if err != nil {
 		p.logger.Debug(err)
+
 		return err
 	}
 
@@ -226,18 +233,21 @@ func (p *postgresDBAccess) returnSingleDBResult(result sql.Result, err error) er
 
 	if resultErr != nil {
 		p.logger.Error(resultErr)
+
 		return resultErr
 	}
 
 	if rowsAffected == 0 {
-		noRowsErr := errors.New("database operation failed: no rows match given key and etag")
+		noRowsErr := state.NewETagError(state.ETagMismatch, err)
 		p.logger.Error(noRowsErr)
+
 		return noRowsErr
 	}
 
 	if rowsAffected > 1 {
 		tooManyRowsErr := errors.New("database operation failed: more than one row affected, expected one")
 		p.logger.Error(tooManyRowsErr)
+
 		return tooManyRowsErr
 	}
 
@@ -278,5 +288,6 @@ func (p *postgresDBAccess) ensureStateTable(stateTableName string) error {
 func tableExists(db *sql.DB, tableName string) (bool, error) {
 	var exists bool = false
 	err := db.QueryRow("SELECT EXISTS (SELECT FROM pg_tables where tablename = $1)", tableName).Scan(&exists)
+
 	return exists, err
 }

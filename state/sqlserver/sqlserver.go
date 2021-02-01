@@ -44,10 +44,10 @@ const (
 	// UUIDKeyType defines a key of type UUID/GUID
 	UUIDKeyType KeyType = "uuid"
 
-	//IntegerKeyType defines a key of type integer
+	// IntegerKeyType defines a key of type integer
 	IntegerKeyType KeyType = "integer"
 
-	//InvalidKeyType defines an invalid key type
+	// InvalidKeyType defines an invalid key type
 	InvalidKeyType KeyType = "invalid"
 )
 
@@ -111,6 +111,7 @@ func isValidSQLName(s string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -120,6 +121,7 @@ func isValidIndexedPropertyName(s string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -129,6 +131,7 @@ func isValidIndexedPropertyType(s string) bool {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -297,6 +300,7 @@ func (s *SQLServer) executeMulti(sets []state.SetRequest, deletes []state.Delete
 		err = s.executeBulkDelete(tx, deletes)
 		if err != nil {
 			tx.Rollback()
+
 			return err
 		}
 	}
@@ -306,6 +310,7 @@ func (s *SQLServer) executeMulti(sets []state.SetRequest, deletes []state.Delete
 			err = s.executeSet(tx, &sets[i])
 			if err != nil {
 				tx.Rollback()
+
 				return err
 			}
 		}
@@ -318,11 +323,11 @@ func (s *SQLServer) executeMulti(sets []state.SetRequest, deletes []state.Delete
 func (s *SQLServer) Delete(req *state.DeleteRequest) error {
 	var err error
 	var res sql.Result
-	if req.ETag != "" {
+	if req.ETag != nil {
 		var b []byte
-		b, err = hex.DecodeString(req.ETag)
+		b, err = hex.DecodeString(*req.ETag)
 		if err != nil {
-			return err
+			return state.NewETagError(state.ETagInvalid, err)
 		}
 
 		res, err = s.db.Exec(s.deleteWithETagCommand, sql.Named(keyColumnName, req.Key), sql.Named(rowVersionColumnName, b))
@@ -331,6 +336,10 @@ func (s *SQLServer) Delete(req *state.DeleteRequest) error {
 	}
 
 	if err != nil {
+		if req.ETag != nil {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
+
 		return err
 	}
 
@@ -362,6 +371,7 @@ func (s *SQLServer) BulkDelete(req []state.DeleteRequest) error {
 	err = s.executeBulkDelete(tx, req)
 	if err != nil {
 		tx.Rollback()
+
 		return err
 	}
 
@@ -375,10 +385,10 @@ func (s *SQLServer) executeBulkDelete(db dbExecutor, req []state.DeleteRequest) 
 	for i, d := range req {
 		var etag []byte
 		var err error
-		if d.ETag != "" {
-			etag, err = hex.DecodeString(d.ETag)
+		if d.ETag != nil {
+			etag, err = hex.DecodeString(*d.ETag)
 			if err != nil {
-				return err
+				return state.NewETagError(state.ETagInvalid, err)
 			}
 		}
 		values[i] = TvpDeleteTableStringKey{ID: d.Key, RowVersion: etag}
@@ -401,6 +411,7 @@ func (s *SQLServer) executeBulkDelete(db dbExecutor, req []state.DeleteRequest) 
 
 	if int(rows) != len(req) {
 		err = fmt.Errorf("delete affected only %d rows, expected %d", rows, len(req))
+
 		return err
 	}
 
@@ -410,7 +421,6 @@ func (s *SQLServer) executeBulkDelete(db dbExecutor, req []state.DeleteRequest) 
 // Get returns an entity from store
 func (s *SQLServer) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	rows, err := s.db.Query(s.getCommand, sql.Named(keyColumnName, req.Key))
-
 	if err != nil {
 		return nil, err
 	}
@@ -440,6 +450,11 @@ func (s *SQLServer) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	}, nil
 }
 
+// BulkGet performs a bulks get operations
+func (s *SQLServer) BulkGet(req []state.GetRequest) (bool, []state.BulkGetResponse, error) {
+	return false, nil, nil
+}
+
 // Set adds/updates an entity on store
 func (s *SQLServer) Set(req *state.SetRequest) error {
 	return s.executeSet(s.db, req)
@@ -458,16 +473,20 @@ func (s *SQLServer) executeSet(db dbExecutor, req *state.SetRequest) error {
 		return err
 	}
 	etag := sql.Named(rowVersionColumnName, nil)
-	if req.ETag != "" {
+	if req.ETag != nil {
 		var b []byte
-		b, err = hex.DecodeString(req.ETag)
+		b, err = hex.DecodeString(*req.ETag)
 		if err != nil {
-			return err
+			return state.NewETagError(state.ETagInvalid, err)
 		}
 		etag.Value = b
 	}
 	res, err := db.Exec(s.upsertCommand, sql.Named(keyColumnName, req.Key), sql.Named("Data", string(bytes)), etag)
 	if err != nil {
+		if req.ETag != nil && *req.ETag != "" {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
+
 		return err
 	}
 
@@ -494,10 +513,12 @@ func (s *SQLServer) BulkSet(req []state.SetRequest) error {
 		err = s.executeSet(tx, &req[i])
 		if err != nil {
 			tx.Rollback()
+
 			return err
 		}
 	}
 
 	err = tx.Commit()
+
 	return err
 }

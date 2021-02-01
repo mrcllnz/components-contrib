@@ -93,7 +93,7 @@ func TestRethinkDBStateStore(t *testing.T) {
 		d2.F2 = 2
 		d2.F3 = time.Now().UTC()
 		tag := fmt.Sprintf("hash-%d", time.Now().UnixNano())
-		if err = db.Set(&state.SetRequest{Key: k, Value: d2, ETag: tag}); err != nil {
+		if err = db.Set(&state.SetRequest{Key: k, Value: d2, ETag: &tag}); err != nil {
 			t.Fatalf("error setting data to db: %v", err)
 		}
 
@@ -226,13 +226,15 @@ func TestRethinkDBStateStoreMulti(t *testing.T) {
 					Operation: state.Upsert,
 					Request: state.SetRequest{
 						Key:   fmt.Sprintf(recordIDFormat, 0),
-						Value: d2},
+						Value: d2,
+					},
 				},
 				{
 					Operation: state.Upsert,
 					Request: state.SetRequest{
 						Key:   fmt.Sprintf(recordIDFormat, 1),
-						Value: d2},
+						Value: d2,
+					},
 				},
 				{
 					Operation: state.Delete,

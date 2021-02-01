@@ -9,6 +9,8 @@ import (
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/dapr/pkg/logger"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -55,15 +57,17 @@ func (g *GCPPubSub) Init(meta pubsub.Metadata) error {
 
 	g.client = pubsubClient
 	g.metadata = &pubsubMeta
+
 	return nil
 }
 
 func (g *GCPPubSub) parseMetadata(metadata pubsub.Metadata) ([]byte, error) {
 	b, err := json.Marshal(metadata.Properties)
+
 	return b, err
 }
 
-//Publish the topic to GCP Pubsub
+// Publish the topic to GCP Pubsub
 func (g *GCPPubSub) Publish(req *pubsub.PublishRequest) error {
 	if !g.metadata.DisableEntityManagement {
 		err := g.ensureTopic(req.Topic)
@@ -97,9 +101,10 @@ func (g *GCPPubSub) Subscribe(req pubsub.SubscribeRequest, daprHandler func(msg 
 	}
 
 	topic := g.getTopic(req.Topic)
-	sub := g.getSubscription(g.metadata.ConsumerID)
+	sub := g.getSubscription(g.metadata.ConsumerID + "-" + req.Topic)
 
 	go g.handleSubscriptionMessages(topic, sub, daprHandler)
+
 	return nil
 }
 
@@ -116,16 +121,27 @@ func (g *GCPPubSub) handleSubscriptionMessages(topic *gcppubsub.Topic, sub *gcpp
 			m.Ack()
 		}
 	})
+
 	return err
 }
 
 func (g *GCPPubSub) ensureTopic(topic string) error {
 	entity := g.getTopic(topic)
 	exists, err := entity.Exists(context.Background())
+	if err != nil {
+		return err
+	}
+
 	if !exists {
 		_, err = g.client.CreateTopic(context.Background(), topic)
+		if status.Code(err) == codes.AlreadyExists {
+			return nil
+		}
+
+		return err
 	}
-	return err
+
+	return nil
 }
 
 func (g *GCPPubSub) getTopic(topic string) *gcppubsub.Topic {
@@ -138,15 +154,25 @@ func (g *GCPPubSub) ensureSubscription(subscription string, topic string) error 
 		return err
 	}
 
-	entity := g.getSubscription(subscription)
+	managedSubscription := subscription + "-" + topic
+	entity := g.getSubscription(managedSubscription)
 	exists, subErr := entity.Exists(context.Background())
 	if !exists {
-		_, subErr = g.client.CreateSubscription(context.Background(), g.metadata.ConsumerID,
+		_, subErr = g.client.CreateSubscription(context.Background(), managedSubscription,
 			gcppubsub.SubscriptionConfig{Topic: g.getTopic(topic)})
 	}
+
 	return subErr
 }
 
 func (g *GCPPubSub) getSubscription(subscription string) *gcppubsub.Subscription {
 	return g.client.Subscription(subscription)
+}
+
+func (g *GCPPubSub) Close() error {
+	return g.client.Close()
+}
+
+func (g *GCPPubSub) Features() []pubsub.Feature {
+	return nil
 }

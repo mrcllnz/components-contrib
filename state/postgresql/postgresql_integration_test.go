@@ -133,7 +133,6 @@ func TestPostgreSQLIntegration(t *testing.T) {
 // setGetUpdateDeleteOneItem validates setting one item, getting it, and deleting it.
 func setGetUpdateDeleteOneItem(t *testing.T, pgs *PostgreSQL) {
 	key := randomKey()
-	//value := `{"something": "DKbLaZwrlCAZ"}`
 	value := &fakeItem{Color: "yellow"}
 
 	setItem(t, pgs, key, value, "")
@@ -294,10 +293,11 @@ func deleteWithInvalidEtagFails(t *testing.T, pgs *PostgreSQL) {
 	value := &fakeItem{Color: "mauve"}
 	setItem(t, pgs, key, value, "")
 
+	etag := "1234"
 	// Delete the item with a fake etag
 	deleteReq := &state.DeleteRequest{
 		Key:  key,
-		ETag: "1234",
+		ETag: &etag,
 	}
 	err := pgs.Delete(deleteReq)
 	assert.NotNil(t, err)
@@ -318,7 +318,7 @@ func newItemWithEtagFails(t *testing.T, pgs *PostgreSQL) {
 
 	setReq := &state.SetRequest{
 		Key:   randomKey(),
-		ETag:  invalidEtag,
+		ETag:  &invalidEtag,
 		Value: value,
 	}
 
@@ -345,7 +345,7 @@ func updateWithOldEtagFails(t *testing.T, pgs *PostgreSQL) {
 	newValue = &fakeItem{Color: "maroon"}
 	setReq := &state.SetRequest{
 		Key:   key,
-		ETag:  originalEtag,
+		ETag:  &originalEtag,
 		Value: newValue,
 	}
 	err := pgs.Set(setReq)
@@ -505,7 +505,7 @@ func getConnectionString() string {
 func setItem(t *testing.T, pgs *PostgreSQL, key string, value interface{}, etag string) {
 	setReq := &state.SetRequest{
 		Key:   key,
-		ETag:  etag,
+		ETag:  &etag,
 		Value: value,
 	}
 
@@ -526,13 +526,14 @@ func getItem(t *testing.T, pgs *PostgreSQL, key string) (*state.GetResponse, *fa
 	assert.NotNil(t, response)
 	outputObject := &fakeItem{}
 	_ = json.Unmarshal(response.Data, outputObject)
+
 	return response, outputObject
 }
 
 func deleteItem(t *testing.T, pgs *PostgreSQL, key string, etag string) {
 	deleteReq := &state.DeleteRequest{
 		Key:     key,
-		ETag:    etag,
+		ETag:    &etag,
 		Options: state.DeleteStateOption{},
 	}
 
@@ -550,6 +551,7 @@ func storeItemExists(t *testing.T, key string) bool {
 	statement := fmt.Sprintf(`SELECT EXISTS (SELECT FROM %s WHERE key = $1)`, tableName)
 	err = db.QueryRow(statement, key).Scan(&exists)
 	assert.Nil(t, err)
+
 	return exists
 }
 
@@ -560,6 +562,7 @@ func getRowData(t *testing.T, key string) (returnValue string, insertdate sql.Nu
 
 	err = db.QueryRow(fmt.Sprintf("SELECT value, insertdate, updatedate FROM %s WHERE key = $1", tableName), key).Scan(&returnValue, &insertdate, &updatedate)
 	assert.Nil(t, err)
+
 	return returnValue, insertdate, updatedate
 }
 

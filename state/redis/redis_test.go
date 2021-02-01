@@ -12,10 +12,9 @@ import (
 	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/dapr/pkg/logger"
-	"github.com/stretchr/testify/assert"
-
 	redis "github.com/go-redis/redis/v7"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestGetKeyVersion(t *testing.T) {
@@ -53,31 +52,35 @@ func TestGetKeyVersion(t *testing.T) {
 func TestParseEtag(t *testing.T) {
 	store := NewRedisStateStore(logger.NewLogger("test"))
 	t.Run("Empty ETag", func(t *testing.T) {
+		etag := ""
 		ver, err := store.parseETag(&state.SetRequest{
-			ETag: "",
+			ETag: &etag,
 		})
 		assert.Equal(t, nil, err, "failed to parse ETag")
 		assert.Equal(t, 0, ver, "default version should be 0")
 	})
 	t.Run("Number ETag", func(t *testing.T) {
+		etag := "354"
 		ver, err := store.parseETag(&state.SetRequest{
-			ETag: "354",
+			ETag: &etag,
 		})
 		assert.Equal(t, nil, err, "failed to parse ETag")
 		assert.Equal(t, 354, ver, "version should be 254")
 	})
 	t.Run("String ETag", func(t *testing.T) {
+		etag := "dragon"
 		_, err := store.parseETag(&state.SetRequest{
-			ETag: "dragon",
+			ETag: &etag,
 		})
 		assert.NotNil(t, err, "shouldn't recognize string ETag")
 	})
 	t.Run("Concurrency=LastWrite", func(t *testing.T) {
+		etag := "dragon"
 		ver, err := store.parseETag(&state.SetRequest{
 			Options: state.SetStateOption{
 				Concurrency: state.LastWrite,
 			},
-			ETag: "dragon",
+			ETag: &etag,
 		})
 		assert.Equal(t, nil, err, "failed to parse ETag")
 		assert.Equal(t, 0, ver, "version should be 0")
@@ -155,12 +158,13 @@ func TestTransactionalDelete(t *testing.T) {
 		Value: "deathstar",
 	})
 
+	etag := "1"
 	err := ss.Multi(&state.TransactionalStateRequest{
 		Operations: []state.TransactionalStateOperation{{
 			Operation: state.Delete,
 			Request: state.DeleteRequest{
 				Key:  "weapon",
-				ETag: "1",
+				ETag: &etag,
 			},
 		}},
 	})
@@ -215,5 +219,6 @@ func setupMiniredis() (*miniredis.Miniredis, *redis.Client) {
 		Addr: s.Addr(),
 		DB:   defaultDB,
 	}
+
 	return s, redis.NewClient(opts)
 }

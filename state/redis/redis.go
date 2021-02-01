@@ -17,10 +17,8 @@ import (
 	"github.com/dapr/components-contrib/state"
 	"github.com/dapr/components-contrib/state/utils"
 	"github.com/dapr/dapr/pkg/logger"
-
-	jsoniter "github.com/json-iterator/go"
-
 	redis "github.com/go-redis/redis/v7"
+	jsoniter "github.com/json-iterator/go"
 )
 
 const (
@@ -45,6 +43,7 @@ const (
 
 // StateStore is a Redis state store
 type StateStore struct {
+	state.DefaultBulkStore
 	client   *redis.Client
 	json     jsoniter.API
 	metadata metadata
@@ -55,10 +54,13 @@ type StateStore struct {
 
 // NewRedisStateStore returns a new redis state store
 func NewRedisStateStore(logger logger.Logger) *StateStore {
-	return &StateStore{
+	s := &StateStore{
 		json:   jsoniter.ConfigFastest,
 		logger: logger,
 	}
+	s.DefaultBulkStore = state.NewDefaultBulkStore(s)
+
+	return s
 }
 
 func parseRedisMetadata(meta state.Metadata) (metadata, error) {
@@ -204,6 +206,7 @@ func (r *StateStore) parseConnectedSlaves(res string) int {
 	for _, info := range infos {
 		if strings.Contains(info, connectedSlavesReplicas) {
 			parsedReplicas, _ := strconv.ParseUint(info[len(connectedSlavesReplicas):], 10, 32)
+
 			return int(parsedReplicas)
 		}
 	}
@@ -212,13 +215,13 @@ func (r *StateStore) parseConnectedSlaves(res string) int {
 }
 
 func (r *StateStore) deleteValue(req *state.DeleteRequest) error {
-	if req.ETag == "" {
-		req.ETag = "0"
+	if req.ETag == nil {
+		etag := "0"
+		req.ETag = &etag
 	}
-	_, err := r.client.DoContext(context.Background(), "EVAL", delQuery, 1, req.Key, req.ETag).Result()
-
+	_, err := r.client.DoContext(context.Background(), "EVAL", delQuery, 1, req.Key, *req.ETag).Result()
 	if err != nil {
-		return fmt.Errorf("failed to delete key '%s' due to ETag mismatch", req.Key)
+		return state.NewETagError(state.ETagMismatch, err)
 	}
 
 	return nil
@@ -230,19 +233,8 @@ func (r *StateStore) Delete(req *state.DeleteRequest) error {
 	if err != nil {
 		return err
 	}
+
 	return state.DeleteWithOptions(r.deleteValue, req)
-}
-
-// BulkDelete performs a bulk delete operation
-func (r *StateStore) BulkDelete(req []state.DeleteRequest) error {
-	for i := range req {
-		err := r.Delete(&req[i])
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (r *StateStore) directGet(req *state.GetRequest) (*state.GetResponse, error) {
@@ -256,6 +248,7 @@ func (r *StateStore) directGet(req *state.GetRequest) (*state.GetResponse, error
 	}
 
 	s, _ := strconv.Unquote(fmt.Sprintf("%q", res))
+
 	return &state.GetResponse{
 		Data: []byte(s),
 	}, nil
@@ -279,6 +272,7 @@ func (r *StateStore) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &state.GetResponse{
 		Data: []byte(data),
 		ETag: version,
@@ -299,6 +293,10 @@ func (r *StateStore) setValue(req *state.SetRequest) error {
 
 	_, err = r.client.DoContext(context.Background(), "EVAL", setQuery, 1, req.Key, ver, bt).Result()
 	if err != nil {
+		if req.ETag != nil {
+			return state.NewETagError(state.ETagMismatch, err)
+		}
+
 		return fmt.Errorf("failed to set key %s: %s", req.Key, err)
 	}
 
@@ -317,18 +315,6 @@ func (r *StateStore) Set(req *state.SetRequest) error {
 	return state.SetWithOptions(r.setValue, req)
 }
 
-// BulkSet performs a bulks save operation
-func (r *StateStore) BulkSet(req []state.SetRequest) error {
-	for i := range req {
-		err := r.Set(&req[i])
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // Multi performs a transactional operation. succeeds only if all operations succeed, and fails if one or more operations fail
 func (r *StateStore) Multi(request *state.TransactionalStateRequest) error {
 	pipe := r.client.TxPipeline()
@@ -343,14 +329,16 @@ func (r *StateStore) Multi(request *state.TransactionalStateRequest) error {
 			pipe.Do("EVAL", setQuery, 1, req.Key, ver, bt)
 		} else if o.Operation == state.Delete {
 			req := o.Request.(state.DeleteRequest)
-			if req.ETag == "" {
-				req.ETag = "0"
+			if req.ETag == nil {
+				etag := "0"
+				req.ETag = &etag
 			}
-			pipe.Do("EVAL", delQuery, 1, req.Key, req.ETag)
+			pipe.Do("EVAL", delQuery, 1, req.Key, *req.ETag)
 		}
 	}
 
 	_, err := pipe.Exec()
+
 	return err
 }
 
@@ -371,16 +359,18 @@ func (r *StateStore) getKeyVersion(vals []interface{}) (data string, version str
 	if !seenData || !seenVersion {
 		return "", "", errors.New("required hash field 'data' or 'version' was not found")
 	}
+
 	return data, version, nil
 }
 
 func (r *StateStore) parseETag(req *state.SetRequest) (int, error) {
-	if req.Options.Concurrency == state.LastWrite || req.ETag == "" {
+	if req.Options.Concurrency == state.LastWrite || req.ETag == nil || (req.ETag != nil && *req.ETag == "") {
 		return 0, nil
 	}
-	ver, err := strconv.Atoi(req.ETag)
+	ver, err := strconv.Atoi(*req.ETag)
 	if err != nil {
-		return -1, err
+		return -1, state.NewETagError(state.ETagInvalid, err)
 	}
+
 	return ver, nil
 }

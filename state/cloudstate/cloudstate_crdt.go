@@ -62,10 +62,10 @@ func (c *CRDT) Init(metadata state.Metadata) error {
 	if err != nil {
 		return err
 	}
+
 	c.metadata = m
-	go func() {
-		c.startServer() // TODO: capture this error
-	}()
+	go c.startServer()
+
 	return nil
 }
 
@@ -99,6 +99,7 @@ func (c *CRDT) startServer() error {
 		c.logger.Fatalf("failed to run: %v", err)
 		return err
 	}
+
 	return nil
 }
 
@@ -114,6 +115,7 @@ func (c *CRDT) createConnectionOnce() error {
 			c.connection = conn
 		}
 	})
+
 	return connError
 }
 
@@ -134,6 +136,7 @@ func (c *CRDT) parseMetadata(metadata state.Metadata) (*crdtMetadata, error) {
 	} else {
 		return nil, fmt.Errorf("serverPort field required")
 	}
+
 	return &m, nil
 }
 
@@ -163,7 +166,13 @@ func (c *CRDT) Get(req *state.GetRequest) (*state.GetResponse, error) {
 	if resp.Data != nil {
 		stateResp.Data = resp.Data.Value
 	}
+
 	return stateResp, nil
+}
+
+// BulkGet performs a bulks get operations
+func (c *CRDT) BulkGet(req []state.GetRequest) (bool, []state.BulkGetResponse, error) {
+	return false, nil, nil
 }
 
 // Delete performs a delete operation
@@ -177,9 +186,14 @@ func (c *CRDT) Delete(req *state.DeleteRequest) error {
 	defer cancel()
 
 	client := c.getClient()
+
+	var etag string
+	if req.ETag != nil {
+		etag = *req.ETag
+	}
 	_, err = client.DeleteState(ctx, &kvstore_pb.DeleteStateEnvelope{
 		Key:  req.Key,
-		Etag: req.ETag,
+		Etag: etag,
 	})
 	return err
 }
@@ -197,10 +211,11 @@ func (c *CRDT) BulkDelete(req []state.DeleteRequest) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
-// Set saves state into Cloudstate
+// Set saves state into Cloudstate.
 func (c *CRDT) Set(req *state.SetRequest) error {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -219,17 +234,23 @@ func (c *CRDT) Set(req *state.SetRequest) error {
 	}
 
 	client := c.getClient()
+	var etag string
+	if req.ETag != nil {
+		etag = *req.ETag
+	}
+
 	_, err = client.SaveState(ctx, &kvstore_pb.SaveStateEnvelope{
 		Key:  req.Key,
-		Etag: req.ETag,
+		Etag: etag,
 		Value: &any.Any{
 			Value: bt,
 		},
 	})
+
 	return err
 }
 
-// BulkSet performs a bulks save operation
+// BulkSet performs a bulks save operation.
 func (c *CRDT) BulkSet(req []state.SetRequest) error {
 	err := c.createConnectionOnce()
 	if err != nil {
@@ -242,10 +263,11 @@ func (c *CRDT) BulkSet(req []state.SetRequest) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
-// value embeds the chosen CRDT type used to store data in Cloudstate
+// value embeds the chosen CRDT type used to store data in Cloudstate.
 type value struct {
 	register *crdt.LWWRegister
 }
